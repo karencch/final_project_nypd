@@ -1,0 +1,264 @@
+---
+title: "NYPD Shooting Incident Data Report"
+author: "KC"
+date: "2026-06-05"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+``` {r load_packages}
+# Load necessary packages:
+library(tidyverse)
+library(lubridate)
+```
+
+
+## Project Step 1: Start Rmd Document
+
+This project will use a dataset of shooting incidents in New York City. I wanted to look at if victim age group and borough are associated with differences in shooting incident counts around New York City.
+
+We will need to download the NYPD Crime dataset called 'ARCHIVED_NYPD Shooting Incident Data (Historic)' on data.gov 
+
+### Getting current data 
+Download csv from a url and save the csv data to a variable.
+
+```{r initial_data}
+
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+
+mydata <- read_csv(url_in)
+
+mydata 
+```
+
+
+## Project Step 2: Tidy and Transform Data
+
+### Initial summary of the data
+
+```{r summ}
+summary(mydata)
+```
+
+### Change appropriate variables to factor and date types and remove un-needed columns
+
+You can see column OCCUR_DATE is of 'chr' type and needs to be converted to a date (we can use lubridate package).
+
+```{r datatype_check}
+str(mydata)
+
+mydata$OCCUR_DATE <- mdy(mydata$OCCUR_DATE)
+
+```
+
+I am not interested in exact coordinates or latitude/longitude of the crime, so I will remove them.
+
+```{r remove_cols}
+
+mydata <- mydata[, !(names(mydata) %in% c(
+  "X_COORD_CD",
+  "Y_COORD_CD",
+  "Latitude",
+  "Longitude",
+  "Lon_Lat"
+))]
+
+```
+
+
+All columns need to be changed to factors except for: INCIDENT_KEY (no need to change since it is an ID), OCCUR_TIME (already a time datatype), STATISTICAL_MURDER_FLAG (okay due to is true/false). 
+
+```{r factors}
+mydata$BORO <- factor(mydata$BORO)
+mydata$LOC_OF_OCCUR_DESC <- factor(mydata$LOC_OF_OCCUR_DESC)
+mydata$PRECINCT <- factor(mydata$PRECINCT)
+mydata$JURISDICTION_CODE <- factor(mydata$JURISDICTION_CODE)
+mydata$LOC_CLASSFCTN_DESC <- factor(mydata$LOC_CLASSFCTN_DESC)
+mydata$LOCATION_DESC <- factor(mydata$LOCATION_DESC)
+mydata$PERP_AGE_GROUP <- factor(mydata$PERP_AGE_GROUP)
+mydata$PERP_SEX <- factor(mydata$PERP_SEX)
+mydata$PERP_RACE <- factor(mydata$PERP_RACE)
+mydata$VIC_AGE_GROUP <- factor(mydata$VIC_AGE_GROUP)
+mydata$VIC_SEX <- factor(mydata$VIC_SEX)
+mydata$VIC_RACE <- factor(mydata$VIC_RACE)
+
+```
+
+### Handle missing data
+
+Let us re-check our datatypes and see a summary of the data now that we've done some initial tidying.
+
+From the summary output, it looks like we have missing values in LOC_CLASSFCTN_DESC, LOCATION_DESC, PERP_AGE_GROUP, PERP_SEX, PERP_RACE. 
+
+My plan to handle missing values is as follows: 
+The 3 'PERP' columns all have 1628 nulls, which the large number could make sense since we wouldn't know the details of a perpetrator that has not been caught. That being said, these columns have existing values for 'UNKNOWN' so I would likely replace these nulls with 'UNKNOWN'.
+The LOC_CLASSFCTN_DESC has over 2000 nulls but this column also has 'NA' values. I could replace the nulls with NA, assuming the NA means 'No answer' (I would have to confirm this before I actually replace the nulls, however.)
+
+``` {r recheck_dt}
+str(mydata)
+```
+
+``` {r recheck_summ}
+
+summary(mydata)
+```
+
+
+## Project Step 3: Add Visualizations & Analysis
+
+This bar chart shows how much shooting-related crime is happening in each borough. Visually we can see Brooklyn has the most crime incidents and Staten Island the least. 
+
+```{r vis1}
+mydata %>%
+  ggplot(aes(x = BORO)) +
+  geom_bar() +
+  labs(title = "Shooting-related Crime Incidents by Borough",
+       x = "Borough",
+       y = "Number of Shooting Incidents")
+```
+
+
+I also wanted to see what age was most likely to be a victim. From the chart below, we can see the most victimized group was the ages between 25-44. 
+
+```{r vis2}
+mydata %>%
+  ggplot(aes(x = VIC_AGE_GROUP)) +
+  geom_bar() +
+  coord_flip() +
+  labs(title = "Victim Age Groups",
+       x = "Age Group",
+       y = "Count")
+
+
+```
+
+There is also an  age group called '1022'; looking back at the summary(mydata) there is only one record with this value so it must be an error. I will filter this data to show only valid age group categories in an updated visualiation below.
+
+```{r remove_bad_val}
+mydata_clean <- mydata %>%
+  filter(VIC_AGE_GROUP != "1022")
+
+mydata_clean %>%
+  ggplot(aes(x = VIC_AGE_GROUP)) +
+  geom_bar() +
+  coord_flip() +
+  labs(title = "Victim Age Groups",
+       x = "Age Group",
+       y = "Count")
+
+```
+
+
+### Some more exploration and analysis
+
+Let us see how age is distributed in the boroughs.
+
+```{r}
+age_boro <- mydata_clean %>%
+  group_by(BORO, VIC_AGE_GROUP) %>%
+  summarize(count = n(), .groups = "drop")
+
+print(age_boro, n = Inf)
+
+```
+
+
+We can add proportions to get a better sense of how the boroughs compare to each other in age distribution.
+
+
+```{r}
+age_boro_pct <- age_boro %>%
+  group_by(BORO) %>%
+  mutate(proportion = count / sum(count))
+
+print(age_boro_pct, n = Inf)
+```
+
+
+A visualization of the counts by borough:
+
+```{r vis3}
+
+age_boro %>%
+  ggplot(aes(x = BORO, y = count, fill = VIC_AGE_GROUP)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Victim Age Distribution by Borough",
+       x = "Borough",
+       y = "Number of Shooting Incidents",
+       fill = "Age Group")
+
+```
+
+
+A visualization of the proportions of victim age groups in boroughs:
+
+```{r}
+age_boro_pct %>%
+  ggplot(aes(x = BORO, y = proportion, fill = VIC_AGE_GROUP)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Proportion of Victim Age Groups by Borough",
+       x = "Borough",
+       y = "Proportion",
+       fill = "Victim Age Group")
+
+```
+
+The visualizations raise additional questions of perhaps other victim traits might increase crime numbers in a borough. For instance, I did not explore race or gender, so investigating these traits further might reveal how a victim's profile influences crime. Also, I focused on the victim for this project, but what about the perpetrator of the crime? That might be another consideration, and similarities or differences in perpetrators versus victims might drive different crime volume across boroughs.
+
+
+## Model
+I used a Poisson regression model to look at expected shooting crime count. I used borough and victim age group as predictors of crime count.
+
+```{r poisson}
+
+poisson_model <- glm(
+  count ~ BORO + VIC_AGE_GROUP,
+  family = poisson,
+  data = age_boro)
+
+summary(poisson_model)
+
+```
+
+The model chose reference groups BRONX and age group < 18.
+
+### Borough
+
+```{r}
+exp(coef(poisson_model)["BOROBROOKLYN"])   # This is doing exp(0.2797)
+
+exp(coef(poisson_model)["BOROSTATEN ISLAND"])   # This is doing exp(-2.3746)
+```
+
+We see BOROBROOKLYN has coefficient = 0.2797. If we exponentiate this, we get about 1.32, which means Brooklyn should be expected to have about 32% more shooting crime incidents than the Bronx, controlling for age group.  
+BOROSTATEN ISLAND = -2.3746, and if we exponentiate, we get about 0.093 which means Staten Island would have about 0.093 times as many incidents as the Bronx. Said another way, this means Staten Island would have about 90.7% (i.e., 1-0.093 = 0.907) fewer expected count of crimes than the reference group (the Bronx).
+
+
+### Age 
+
+For simplicity I just looked at Age 25-44 (the plots showed victims were mostly this group). We exponentiate this group's coefficient.
+
+```{r}
+exp(coef(poisson_model)["VIC_AGE_GROUP25-44"])   # This is doing exp(1.4821)
+```
+
+If we keep borough constant, then we see victims in age 25-44 are expected be seen about 4.4 times as much as the under 18 group (reference group).
+
+
+### Model: Final Thoughts
+The null deviance decreased drastically from a big number to a much smaller number (48900 to about 78). This means that borough and victim age group explain a lot of the variation in the shooting crime counts across borough+age combinations. 
+
+
+
+## Project Step 4: Conclusion & Bias
+
+A bias in the data might be that the data represents only reported or documented crime. That in itself might skew the nature of details in the dataset from reality. In essence, we are only getting part of the picture. Some of my personal biases that might have affected my analysis would be that I am from a big and densely populated city, and I personally know several people in my own age group who were victims of crime (though not necessarily shooting-related). So I might want to conclude that people in my age group are more prone to be victims and that dense, big cities should have more crime and more shootings. To mitigate at least my personal biases, I used proportions to calculate the age structure across boroughs, so that even if I am counting volume of incidents and by age group in a particular borough, I can also look at the proportion to see how boroughs compare on the same scale. 
+
+Based on the plots, it can be seen that age distribution of victims looks similar across boroughs, which implies that the most common shooting victim age is age group 25-44, wherever the person might be located in New York City. However, there is clearly a difference in volume. I focused on the most and least volume boroughs for sake of comparison (e.g., Brooklyn has the most volume and Staten Island the least). The Poisson model showed that Brooklyn has a positive coefficient (higher expected counts) and Staten Island has a negative one (lower expected counts). This means that if we hold victim age constant across boroughs, then the difference in expected shooting incident counts is due to "something" about the borough. In other words, it means the factor of "borough" influences the expected shooting count rather than any different patterns in victim ages in the borough. Similarly, if we hold borough constant then we can see age 25-44 victims will be seen about 4.4 times as much as the reference group. Finally, we saw the null deviance dropped a lot (48900 to about 78), which supports that borough and victim age group are important predictors on crime count.
+
+
